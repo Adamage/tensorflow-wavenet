@@ -20,14 +20,19 @@ from tensorflow.python.client import timeline
 from wavenet import WaveNetModel, AudioReader, optimizer_factory
 
 BATCH_SIZE = 1
-DATA_DIRECTORY = './VCTK-Corpus'
+DATA_DIRECTORY = './data/slt_arctic_demo_data/'
+FILE_LIST = './data/train_demo_file_list.scp'
+AUDIO_EXT = '.wav'
+LABEL_EXT = '.lab'
+LABEL_DIM = 425
+FRAME_SHIFT = 0.005
 LOGDIR_ROOT = './logdir'
-CHECKPOINT_EVERY = 50
+CHECKPOINT_EVERY = 200
 NUM_STEPS = int(1e5)
 LEARNING_RATE = 1e-3
 WAVENET_PARAMS = './wavenet_params.json'
 STARTED_DATESTRING = "{0:%Y-%m-%dT%H-%M-%S}".format(datetime.now())
-SAMPLE_SIZE = 100000
+SAMPLE_SIZE = None
 L2_REGULARIZATION_STRENGTH = 0
 SILENCE_THRESHOLD = 0.3
 EPSILON = 0.001
@@ -46,8 +51,20 @@ def get_arguments():
     parser = argparse.ArgumentParser(description='WaveNet example network')
     parser.add_argument('--batch_size', type=int, default=BATCH_SIZE,
                         help='How many wav files to process at once.')
-    parser.add_argument('--data_dir', type=str, default=DATA_DIRECTORY,
-                        help='The directory containing the VCTK corpus.')
+    parser.add_argument('--file_list', type=str, default=FILE_LIST,
+                        help='The list that contains the base names of the training audio and label files.')
+    parser.add_argument('--audio_dir', type=str, default=DATA_DIRECTORY+'wav/',
+                        help='The directory containing the audio samples.')
+    parser.add_argument('--label_dir', type=str, default=DATA_DIRECTORY+'binary_label_norm/',
+                        help='The directory containing the full context labels.')
+    parser.add_argument('--label_dim', type=int, default=LABEL_DIM,
+                        help='The dimension of the min-max normalized binary full context labels.')
+    parser.add_argument('--audio_ext', type=str, default=AUDIO_EXT,
+                        help='The extention of the audio filenames.')
+    parser.add_argument('--label_ext', type=str, default=LABEL_EXT,
+                        help='The extention of the label filenames.')
+    parser.add_argument('--frame_shift', type=float, default=FRAME_SHIFT,
+                        help='The shift of the window in label files. Usually 0.005 sec') 
     parser.add_argument('--store_metadata', type=bool, default=False,
                         help='Whether to store advanced debugging information '
                         '(execution time, memory consumption) for use with '
@@ -209,18 +226,26 @@ def main():
         silence_threshold = args.silence_threshold if args.silence_threshold > \
                                                       EPSILON else None
         reader = AudioReader(
-            args.data_dir,
             coord,
+            args.file_list,
+            args.audio_dir, 
+            args.label_dir,
+            args.label_dim,
+            args.audio_ext,
+            args.label_ext,
             sample_rate=wavenet_params['sample_rate'],
+            frame_shift=args.frame_shift,  
             sample_size=args.sample_size,
-            silence_threshold=args.silence_threshold)
-        audio_batch = reader.dequeue(args.batch_size)
+            silence_threshold=args.silence_threshold,
+            queue_size=16)
+        audio_and_labels = reader.dequeue() 
 
     # Create network.
     net = WaveNetModel(
         batch_size=args.batch_size,
         dilations=wavenet_params["dilations"],
         filter_width=wavenet_params["filter_width"],
+        label_dim=args.label_dim,
         residual_channels=wavenet_params["residual_channels"],
         dilation_channels=wavenet_params["dilation_channels"],
         skip_channels=wavenet_params["skip_channels"],
@@ -231,7 +256,7 @@ def main():
         histograms=args.histograms)
     if args.l2_regularization_strength == 0:
         args.l2_regularization_strength = None
-    loss = net.loss(audio_batch, args.l2_regularization_strength)
+    loss = net.loss(audio_and_labels, args.l2_regularization_strength)
     optimizer = optimizer_factory[args.optimizer](
                     learning_rate=args.learning_rate,
                     momentum=args.momentum)
@@ -292,6 +317,7 @@ def main():
             else:
                 summary, loss_value, _ = sess.run([summaries, loss, optim])
                 writer.add_summary(summary, step)
+                
 
             duration = time.time() - start_time
             print('step {:d} - loss = {:.3f}, ({:.3f} sec/step)'

@@ -13,12 +13,14 @@ import tensorflow as tf
 from wavenet import WaveNetModel, mu_law_decode, mu_law_encode, audio_reader
 
 SAMPLES = 16000
+DATA_DIRECTORY = './data/slt_arctic_demo_data/'
+FILE_LIST = './data/test_file_list.scp'
 TEMPERATURE = 1.0
 LOGDIR = './logdir'
 WINDOW = 8000
 WAVENET_PARAMS = './wavenet_params.json'
 SAVE_EVERY = None
-SILENCE_THRESHOLD = 0.1
+SILENCE_THRESHOLD = 0.0 #0.1
 
 
 def get_arguments():
@@ -100,7 +102,7 @@ def create_seed(filename,
                 window_size=WINDOW,
                 silence_threshold=SILENCE_THRESHOLD):
     audio, _ = librosa.load(filename, sr=sample_rate, mono=True)
-    audio = audio_reader.trim_silence(audio, silence_threshold)
+    #audio = audio_reader.trim_silence(audio, silence_threshold)
 
     quantized = mu_law_encode(audio, quantization_channels)
     cut_index = tf.cond(tf.size(quantized) < tf.constant(window_size),
@@ -117,26 +119,44 @@ def main():
     with open(args.wavenet_params, 'r') as config_file:
         wavenet_params = json.load(config_file)
 
+
+    labels = tf.placeholder(tf.float32) 
+
+    
+    data_dir = DATA_DIRECTORY
+    file_list = FILE_LIST
+    label_dir = data_dir + 'binary_label_norm/' 
+    audio_dir = data_dir + 'wav/'
+    label_dim = 425
+    n_out = 1
+   
+    iterator = audio_reader.load_generic_audio_label(file_list, audio_dir, label_dir, label_dim) 
+    audio_test, labels_test, filename = iterator.next()
+    n_samples_read = audio_test.shape[0] 
+    labels_test = labels_test.reshape((1, labels_test.shape[0], labels_test.shape[1]))
+
     sess = tf.Session()
 
     net = WaveNetModel(
         batch_size=1,
         dilations=wavenet_params['dilations'],
         filter_width=wavenet_params['filter_width'],
+        label_dim=label_dim,
         residual_channels=wavenet_params['residual_channels'],
         dilation_channels=wavenet_params['dilation_channels'],
-        quantization_channels=wavenet_params['quantization_channels'],
         skip_channels=wavenet_params['skip_channels'],
+        quantization_channels=wavenet_params['quantization_channels'],
         use_biases=wavenet_params['use_biases'],
         scalar_input=wavenet_params['scalar_input'],
-        initial_filter_width=wavenet_params['initial_filter_width'])
+        initial_filter_width=wavenet_params['initial_filter_width'],
+        histograms=False)
 
     samples = tf.placeholder(tf.int32)
 
     if args.fast_generation:
-        next_sample = net.predict_proba_incremental(samples)
+        next_sample = net.predict_proba_incremental(samples, labels)
     else:
-        next_sample = net.predict_proba(samples)
+        next_sample = net.predict_proba(samples, labels)
 
     if args.fast_generation:
         sess.run(tf.initialize_all_variables())
@@ -175,24 +195,29 @@ def main():
         for i, x in enumerate(waveform[-args.window: -1]):
             if i % 100 == 0:
                 print('Priming sample {}'.format(i))
-            sess.run(outputs, feed_dict={samples: x})
+            sess.run(outputs, feed_dict={samples: x, labels: labels_test[:,i:i+1,:]})
         print('Done.')
 
     last_sample_timestamp = datetime.now()
-    for step in range(args.samples):
+    for step in range(n_samples_read):
         if args.fast_generation:
             outputs = [next_sample]
             outputs.extend(net.push_ops)
             window = waveform[-1]
+            labels_window = labels_test[:, step:step+1, :]
         else:
             if len(waveform) > args.window:
                 window = waveform[-args.window:]
             else:
                 window = waveform
             outputs = [next_sample]
+            labels_window = labels_test[:, step:step+min(len(window), args.window), :] # Here there might be a problem with out of index error.
 
         # Run the WaveNet to predict the next sample.
-        prediction = sess.run(outputs, feed_dict={samples: window})[0]
+        #if (step%100 == 0):
+        #    print('step = ', step, ' , ')
+        prediction = sess.run(outputs, feed_dict={samples: window, labels: labels_window})[0]
+              
 
         # Scale prediction distribution using temperature.
         np.seterr(divide='ignore')
