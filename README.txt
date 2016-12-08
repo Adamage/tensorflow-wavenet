@@ -10,3 +10,4 @@ Change the data directory in train.py (DATA_DIRECTORY = './data/slt_arctic_demo_
 You may need to change LABEL_DIM = 425 
 run: python train.py
 
+generate: generate.py --fast_generation=true --wav_out_path ./synthesized.wav --wav_seed data/slt_arctic_demo_data/wav/arctic_a0001.wav ./logdir/train/2016-12-08T22-20-11/model.ckpt-20000
