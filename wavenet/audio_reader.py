@@ -55,18 +55,6 @@ def load_generic_audio_label(file_list, audio_directory, label_directory, labels
         yield audio, labels, audio_filename
 
 
-def load_vctk_audio(directory, sample_rate):
-    '''Generator that yields audio waveforms from the VCTK dataset, and
-    additionally the ID of the corresponding speaker.'''
-    files = find_files(directory)
-    speaker_re = re.compile(r'p([0-9]+)_([0-9]+)\.wav')
-    for filename in files:
-        audio, _ = librosa.load(filename, sr=sample_rate, mono=True)
-        audio = audio.reshape(-1, 1)
-        matches = speaker_re.findall(filename)[0]
-        speaker_id, recording_id = [int(id_) for id_ in matches]
-        yield audio, speaker_id
-
 
 def trim_silence(audio, label, threshold):
     '''Removes silence at the beginning and end of a sample.'''
@@ -160,8 +148,8 @@ class AudioReader(object):
                         label_piece = label_buffer_[:self.sample_size, :]
                         sess.run(self.enqueue,
                                  feed_dict={self.audio_placeholder: audio_piece, self.label_placeholdes: label_piece})
-                        audio_buffer_ = audio_buffer_[self.sample_size:]
-                        label_buffer_ = label_buffer_[self.sample_size:] 
+                        audio_buffer_ = audio_buffer_[self.sample_size:, :]
+                        label_buffer_ = label_buffer_[self.sample_size:, :] 
                 else:
                     sess.run(self.enqueue,
                              feed_dict={self.audio_placeholder: audio, self.label_placeholder: labels})
