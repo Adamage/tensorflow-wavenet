@@ -195,8 +195,8 @@ class AudioReader(object):
                         label_piece = label_buffer_[:self.sample_size, :]
                         sess.run(self.enqueue,
                                  feed_dict={self.audio_placeholder: audio_piece, self.label_placeholdes: label_piece})
-                        audio_buffer_ = audio_buffer_[self.sample_size:]
-                        label_buffer_ = label_buffer_[self.sample_size:] 
+                        audio_buffer_ = audio_buffer_[self.sample_size:, :]
+                        label_buffer_ = label_buffer_[self.sample_size:, :] 
                 else:
                     sess.run(self.enqueue,
                              feed_dict={self.audio_placeholder: audio, self.label_placeholder: labels})
