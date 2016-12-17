@@ -14,7 +14,7 @@ def find_files(file_list, audio_directory, label_directory, audio_ext='*.wav', l
         fid = open(file_list, 'r')
         filenames = fid.readlines()
         fid.close()
-    except IOError: 
+    except IOError:
         return None
 
     audio_fullpathnames = []
@@ -26,7 +26,7 @@ def find_files(file_list, audio_directory, label_directory, audio_ext='*.wav', l
     return audio_fullpathnames, label_fullpathnames
 
 
-def load_generic_audio_label(file_list, audio_directory, label_directory, labels_dim, audio_ext='.wav', label_ext='.lab', sample_rate=16000, frame_shift=0.005):
+def load_generic_audio_label_old(file_list, audio_directory, label_directory, labels_dim, audio_ext='.wav', label_ext='.lab', sample_rate=16000, frame_shift=0.005):
     '''Generator that yields audio waveforms from the directory.'''
     audio_files, label_files = find_files(file_list, audio_directory, label_directory, audio_ext, label_ext)
     for audio_filename, label_filename in zip(audio_files, label_files):
@@ -53,6 +53,55 @@ def load_generic_audio_label(file_list, audio_directory, label_directory, labels
         audio = audio.reshape(-1, 1) 
  
         yield audio, labels, audio_filename
+
+
+def load_generic_audio_label(file_list, audio_directory, label_directory, labels_dim, audio_ext='.wav', label_ext='.lab', sample_rate=16000, frame_shift=0.005):
+    '''Generator that yields audio waveforms from the directory.'''
+    audio_files, label_files = find_files(file_list, audio_directory, label_directory, audio_ext, label_ext)
+    for audio_filename, label_filename in zip(audio_files, label_files):
+        audio, _ = librosa.load(audio_filename, sr=sample_rate, mono=True)
+        
+        n_audio_samples = len(audio) 
+
+        with open(label_filename, 'rb') as fid:
+            labels = np.fromfile(fid, dtype=np.float32, count=-1)
+        fid.close()
+             
+        n_frames = len(labels)/labels_dim 
+        labels = labels.reshape((n_frames, labels_dim))
+       
+        frame_length = 0.025 
+        samples_per_frame = int(sample_rate*frame_length) 
+        samples_per_shift = int(sample_rate*frame_shift)
+
+        # Upsample labels. There is 80% overlap between frames. Each frame is 0.025 sec. The frame shift is 0.005 sec
+        # ---------- frame_0 
+        #   ---------- frame_1
+        #     ---------- frame_2
+        #       ---------- frame_3
+        #         ---------- frame_4
+        # The following overlap-and-add procedure may not be appropriate for features 417:425 
+        n_label_samples = int((n_frames + frame_length/frame_shift - 1)*samples_per_shift)
+        upsampled_labels = np.zeros((n_label_samples, labels_dim))
+        count = np.zeros((n_label_samples, ), dtype=np.float32)
+
+        for j in range(n_frames):
+            i = j*samples_per_shift
+            count[i:i+samples_per_frame] += 1
+            for k in range(samples_per_frame):
+                upsampled_labels[i+k, :] += labels[j, :]
+
+        for j in range(n_label_samples):
+            upsampled_labels[j, :] /= count[j]    
+
+        if (n_audio_samples > n_label_samples):
+            audio = audio[0:n_label_samples]
+        elif (n_audio_samples < n_label_samples):
+            labels = labels[0:n_audio_samples, :]   
+
+        audio = audio.reshape(-1, 1) 
+ 
+        yield audio, upsampled_labels, audio_filename
 
 
 
@@ -101,8 +150,6 @@ class AudioReader(object):
         self.threads = []
         self.audio_placeholder = tf.placeholder(dtype=tf.float32, shape=None)
         self.label_placeholder = tf.placeholder(dtype=tf.float32, shape=None)
-        # One may use here two separate queue like in global conditioning issue #168
-        # Two queues are preferable in many cases.
         self.queue = tf.FIFOQueue(queue_size, ['float32', 'float32'])
         self.enqueue = self.queue.enqueue([self.audio_placeholder, self.label_placeholder])
 
@@ -148,8 +195,8 @@ class AudioReader(object):
                         label_piece = label_buffer_[:self.sample_size, :]
                         sess.run(self.enqueue,
                                  feed_dict={self.audio_placeholder: audio_piece, self.label_placeholdes: label_piece})
-                        audio_buffer_ = audio_buffer_[self.sample_size:, :]
-                        label_buffer_ = label_buffer_[self.sample_size:, :] 
+                        audio_buffer_ = audio_buffer_[self.sample_size:]
+                        label_buffer_ = label_buffer_[self.sample_size:] 
                 else:
                     sess.run(self.enqueue,
                              feed_dict={self.audio_placeholder: audio, self.label_placeholder: labels})
