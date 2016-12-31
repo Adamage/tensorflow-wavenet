@@ -97,7 +97,7 @@ def load_generic_audio_label(file_list, audio_directory, label_directory, labels
         if (n_audio_samples > n_label_samples):
             audio = audio[0:n_label_samples]
         elif (n_audio_samples < n_label_samples):
-            labels = labels[0:n_audio_samples, :]   
+            upsampled_labels = upsampled_labels[0:n_audio_samples, :]   
 
         audio = audio.reshape(-1, 1) 
  
