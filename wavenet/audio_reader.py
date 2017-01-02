@@ -82,7 +82,7 @@ def load_generic_audio_label(file_list, audio_directory, label_directory, labels
         #         ---------- frame_4
         # The following overlap-and-add procedure may not be appropriate for features 417:425 
         n_label_samples = int((n_frames + frame_length/frame_shift - 1)*samples_per_shift)
-        upsampled_labels = np.zeros((n_label_samples, labels_dim))
+        upsampled_labels = np.zeros((n_label_samples, labels_dim), dtype=np.float32)
         count = np.zeros((n_label_samples, ), dtype=np.float32)
 
         for j in range(n_frames):
